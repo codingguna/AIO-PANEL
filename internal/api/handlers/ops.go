@@ -168,6 +168,9 @@ type TerminalExecResponse struct {
 	ExitCode  int    `json:"exit_code"`
 	Duration  string `json:"duration"`
 	Timestamp string `json:"timestamp"`
+	Cwd       string `json:"cwd"`
+	User      string `json:"user"`
+	Hostname  string `json:"hostname"`
 }
 
 // ExecuteTerminalCommand handles POST /api/v1/ops/terminal/exec
@@ -185,21 +188,42 @@ func (h *OpsHandler) ExecuteTerminalCommand(w http.ResponseWriter, r *http.Reque
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
+	// Resolve initial working directory
+	currentDir := strings.TrimSpace(req.Cwd)
+	if currentDir == "" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			currentDir = home
+		} else {
+			currentDir = "/var/www"
+		}
+	}
+
+	hostname, _ := os.Hostname()
+	currentUser := os.Getenv("USER")
+	if currentUser == "" {
+		currentUser = os.Getenv("SUDO_USER")
+	}
+	if currentUser == "" {
+		currentUser = "root"
+	}
+
 	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "powershell.exe", "-Command", cmdStr)
-	} else {
-		cmd = exec.CommandContext(ctx, "bash", "-c", cmdStr)
-	}
-
-	if req.Cwd != "" {
-		cmd.Dir = req.Cwd
-	}
-
 	var stdoutBuf, stderrBuf bytes.Buffer
+
+	delim := "__AIO_PWD_DELIM__"
+	if runtime.GOOS == "windows" {
+		safeDir := strings.ReplaceAll(currentDir, "'", "''")
+		script := fmt.Sprintf("if (Test-Path '%s') { Set-Location '%s' }; %s; Write-Output '%s'; (Get-Location).Path", safeDir, safeDir, cmdStr, delim)
+		cmd = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-Command", script)
+	} else {
+		// Linux shell wrapper that preserves exit code and captures final working directory
+		script := fmt.Sprintf("cd %q 2>/dev/null || cd /; %s\n__AIO_RET=$?\nprintf \"\\n%s\\n%%s\" \"$PWD\"\nexit $__AIO_RET", currentDir, cmdStr, delim)
+		cmd = exec.CommandContext(ctx, "bash", "-c", script)
+	}
+
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
 
@@ -214,6 +238,22 @@ func (h *OpsHandler) ExecuteTerminalCommand(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	rawStdout := stdoutBuf.String()
+	resultingCwd := currentDir
+
+	// Extract clean stdout and resulting working directory
+	if strings.Contains(rawStdout, delim) {
+		parts := strings.Split(rawStdout, delim)
+		cleanStdout := strings.TrimRight(parts[0], "\r\n")
+		rawStdout = cleanStdout
+		if len(parts) > 1 {
+			newDir := strings.TrimSpace(parts[1])
+			if newDir != "" {
+				resultingCwd = newDir
+			}
+		}
+	}
+
 	if h.store != nil {
 		status := "SUCCESS"
 		if exitCode != 0 {
@@ -224,11 +264,14 @@ func (h *OpsHandler) ExecuteTerminalCommand(w http.ResponseWriter, r *http.Reque
 
 	resp := TerminalExecResponse{
 		Command:   cmdStr,
-		Stdout:    stdoutBuf.String(),
+		Stdout:    rawStdout,
 		Stderr:    stderrBuf.String(),
 		ExitCode:  exitCode,
 		Duration:  duration.Round(time.Millisecond).String(),
 		Timestamp: time.Now().Format("15:04:05"),
+		Cwd:       resultingCwd,
+		User:      currentUser,
+		Hostname:  hostname,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

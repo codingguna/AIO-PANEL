@@ -208,6 +208,9 @@ export interface TerminalExecResult {
   exit_code: number;
   duration: string;
   timestamp: string;
+  cwd?: string;
+  user?: string;
+  hostname?: string;
 }
 
 export interface LogResponse {

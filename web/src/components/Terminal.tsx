@@ -5,7 +5,9 @@ export const Terminal: React.FC = () => {
   const [command, setCommand] = useState<string>('');
   const [history, setHistory] = useState<TerminalExecResult[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [cwd, setCwd] = useState<string>('/var/www');
+  const [cwd, setCwd] = useState<string>('/home/ubuntu');
+  const [user, setUser] = useState<string>('ubuntu');
+  const [hostname, setHostname] = useState<string>('server');
   const [cmdHistoryList, setCmdHistoryList] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
 
@@ -16,34 +18,59 @@ export const Terminal: React.FC = () => {
     if (screenRef.current) {
       screenRef.current.scrollTop = screenRef.current.scrollHeight;
     }
-  }, [history]);
+  }, [history, loading]);
 
   const executeCommand = async (cmdToRun: string) => {
-    if (!cmdToRun.trim() || loading) return;
+    const trimmed = cmdToRun.trim();
+    if (!trimmed || loading) return;
+
+    if (trimmed === 'clear' || trimmed === 'cls') {
+      setHistory([]);
+      setCommand('');
+      return;
+    }
 
     setLoading(true);
-    setCmdHistoryList((prev) => [cmdToRun, ...prev]);
+    setCmdHistoryList((prev) => [trimmed, ...prev]);
     setHistoryIndex(-1);
+
+    const executingDir = cwd;
+    const executingUser = user;
+    const executingHost = hostname;
 
     try {
       const res = await fetch('/api/v1/ops/terminal/exec', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmdToRun, cwd }),
+        body: JSON.stringify({ command: trimmed, cwd: executingDir }),
       });
       const data: TerminalExecResult = await res.json();
-      setHistory((prev) => [...prev, data]);
+      
+      // Update persistent working directory and system identity
+      if (data.cwd) setCwd(data.cwd);
+      if (data.user) setUser(data.user);
+      if (data.hostname) setHostname(data.hostname);
+
+      setHistory((prev) => [...prev, {
+        ...data,
+        cwd: executingDir,
+        user: executingUser,
+        hostname: executingHost,
+      }]);
       setCommand('');
     } catch (e: any) {
       setHistory((prev) => [
         ...prev,
         {
-          command: cmdToRun,
+          command: trimmed,
           stdout: '',
           stderr: 'Connection error: ' + e.message,
           exit_code: 1,
           duration: '0ms',
           timestamp: new Date().toLocaleTimeString(),
+          cwd: executingDir,
+          user: executingUser,
+          hostname: executingHost,
         },
       ]);
     } finally {
@@ -56,12 +83,14 @@ export const Terminal: React.FC = () => {
     if (e.key === 'Enter') {
       executeCommand(command);
     } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
       if (cmdHistoryList.length > 0 && historyIndex < cmdHistoryList.length - 1) {
         const nextIdx = historyIndex + 1;
         setHistoryIndex(nextIdx);
         setCommand(cmdHistoryList[nextIdx]);
       }
     } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
       if (historyIndex > 0) {
         const nextIdx = historyIndex - 1;
         setHistoryIndex(nextIdx);
@@ -78,10 +107,10 @@ export const Terminal: React.FC = () => {
     { label: 'Memory (free -m)', cmd: 'free -m' },
     { label: 'Disk Space (df -h)', cmd: 'df -h' },
     { label: 'Listening Ports', cmd: 'ss -tuln' },
-    { label: 'Nginx Test', cmd: 'nginx -t' },
-    { label: 'Active Units', cmd: 'systemctl list-units --type=service --state=running --no-pager' },
-    { label: 'Docker PS', cmd: 'docker ps -a' },
-    { label: 'Git Status', cmd: 'git status' },
+    { label: 'Active Services', cmd: 'systemctl list-units --type=service --state=running --no-pager' },
+    { label: 'Docker Containers', cmd: 'docker ps -a' },
+    { label: 'Nginx Config Test', cmd: 'nginx -t' },
+    { label: 'Who Am I', cmd: 'whoami && pwd' },
   ];
 
   return (
@@ -91,14 +120,14 @@ export const Terminal: React.FC = () => {
         <div className="panel-header" style={{ marginBottom: '0.75rem' }}>
           <div>
             <div className="panel-title">
-              <span>💻</span> Web Terminal & Interactive Runner
+              <span>💻</span> Web Terminal & Interactive Shell
             </div>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>
-              Execute diagnostic and management commands with full stdout/stderr capture and audit logging
+              Interactive Linux shell with persistent directory navigation (`cd`), real-time execution, and audit logging
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-subtle)' }}>Working Dir:</span>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-subtle)' }}>Directory:</span>
             <input
               type="text"
               value={cwd}
@@ -111,7 +140,7 @@ export const Terminal: React.FC = () => {
                 color: '#fff',
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.8rem',
-                width: '180px',
+                width: '200px',
               }}
             />
             <button className="btn" onClick={() => setHistory([])}>
@@ -145,25 +174,27 @@ export const Terminal: React.FC = () => {
             <div className="dot dot-green" />
           </div>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--text-subtle)' }}>
-            aio-panel@server: {cwd}
+            {user}@{hostname}:{cwd}
           </span>
-          <span style={{ fontSize: '0.75rem', color: 'var(--accent-emerald)' }}>● Interactive Mode</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--accent-emerald)' }}>● SSH Shell Session</span>
         </div>
 
         {/* Terminal Screen Output */}
         <div className="terminal-screen" ref={screenRef}>
           {history.length === 0 ? (
-            <div style={{ color: 'var(--text-subtle)' }}>
-              AIO-PANEL Terminal Ready. Type any system command below or click a shortcut above.
+            <div style={{ color: 'var(--text-subtle)', lineHeight: '1.6' }}>
+              Welcome to the AIO-PANEL Linux Web Shell.
               <br />
-              All commands are isolated and recorded in the audit trail.
+              Directory navigation with <code style={{ color: 'var(--accent-emerald)' }}>cd &lt;dir&gt;</code> persists across commands. Type <code style={{ color: 'var(--accent-emerald)' }}>clear</code> to reset console.
             </div>
           ) : (
             history.map((h, i) => (
               <div key={i} style={{ marginBottom: '1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)' }}>
-                  <span style={{ color: 'var(--primary)' }}>aio@server:{cwd}$</span>
-                  <strong>{h.command}</strong>
+                  <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>
+                    {h.user || user}@{h.hostname || hostname}:{h.cwd || cwd}{h.user === 'root' ? '#' : '$'}
+                  </span>
+                  <strong style={{ color: '#ffffff' }}>{h.command}</strong>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-subtle)', marginLeft: 'auto' }}>
                     [{h.timestamp} • {h.duration} • Exit: {h.exit_code}]
                   </span>
@@ -190,14 +221,14 @@ export const Terminal: React.FC = () => {
 
         {/* Command Input Row */}
         <div className="terminal-input-row">
-          <span style={{ color: 'var(--accent-emerald)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
-            ❯
+          <span style={{ color: 'var(--accent-emerald)', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+            {user}@{hostname}:{cwd}{user === 'root' ? '#' : '$'}
           </span>
           <input
             ref={inputRef}
             type="text"
             className="terminal-input"
-            placeholder="Type command here (e.g. systemctl status nginx)..."
+            placeholder="Type command here (e.g. ls -la, cd /home/ubuntu, whoami)..."
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             onKeyDown={handleKeyDown}
