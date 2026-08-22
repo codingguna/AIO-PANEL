@@ -1,0 +1,103 @@
+name: Release AIO-PANEL
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Package Release
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            archive_name: aio-panel-linux-amd64
+          - goos: linux
+            goarch: arm64
+            archive_name: aio-panel-linux-arm64
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build Web UI Frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run Go Tests
+        run: go test -v ./...
+
+      - name: Compile AIO-PANEL Static Binary (${{ matrix.goos }}/${{ matrix.goarch }})
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags "-s -w -X github.com/codingguna/aio-panel/internal/version.Version=${VERSION} -X github.com/codingguna/aio-panel/internal/version.GitCommit=${COMMIT} -X github.com/codingguna/aio-panel/internal/version.BuildDate=${BUILD_DATE}" -o aio ./cmd/aio
+
+      - name: Package Release Archive
+        run: |
+          mkdir -p release_package
+          cp aio release_package/
+          cp scripts/install.sh release_package/
+          cp scripts/uninstall.sh release_package/
+          cp README.md release_package/
+          echo "${GITHUB_REF_NAME}" > release_package/VERSION
+          
+          chmod +x release_package/aio release_package/install.sh release_package/uninstall.sh
+
+          tar -czf "${{ matrix.archive_name }}.tar.gz" -C release_package .
+          sha256sum "${{ matrix.archive_name }}.tar.gz" > "${{ matrix.archive_name }}.tar.gz.sha256"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: |
+            ${{ matrix.archive_name }}.tar.gz
+            ${{ matrix.archive_name }}.tar.gz.sha256
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            aio-panel-linux-amd64/aio-panel-linux-amd64.tar.gz
+            aio-panel-linux-amd64/aio-panel-linux-amd64.tar.gz.sha256
+            aio-panel-linux-arm64/aio-panel-linux-arm64.tar.gz
+            aio-panel-linux-arm64/aio-panel-linux-arm64.tar.gz.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true

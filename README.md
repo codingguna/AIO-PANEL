@@ -138,7 +138,98 @@ AIO-PANEL also provides a local CLI:
 aio status
 ```
 
-The browser and CLI should use the same internal AIO Core.
+The browser and CLI use the same internal AIO Core.
+
+---
+
+# 🚀 Quick Start
+
+### 1. Run Standalone Single Binary (Production)
+
+AIO-PANEL is packaged as a single self-contained binary with the React UI and SQLite database embedded directly:
+
+```bash
+# Linux
+./aio server
+
+# Windows
+.\aio.exe server
+```
+
+Open your browser and navigate to:
+```text
+http://SERVER_IP:5555
+```
+
+### 2. Frontend Development with Hot-Reload (Optional)
+
+```bash
+# Terminal 1: Start Go Backend Daemon
+go run main.go server
+
+# Terminal 2: Start Vite Frontend
+cd web
+npm install
+npm run dev
+```
+
+### 3. Build Single-Binary Releases
+
+```bash
+# Step 1: Build the React distribution bundle
+cd web
+npm run build
+cd ..
+
+# Step 2: Compile the single Go binary with embedded frontend
+go build -o aio .
+
+# Cross-compile for Linux (amd64 / arm64):
+GOOS=linux GOARCH=amd64 go build -o aio-linux-amd64 .
+GOOS=linux GOARCH=arm64 go build -o aio-linux-arm64 .
+```
+
+---
+
+# 💻 CLI Command Reference
+
+AIO-PANEL provides a comprehensive CLI for local server administration:
+
+```bash
+# 1. Read-only environment discovery & port check
+aio preflight
+
+# 2. System diagnostics, SQLite DB & permission checks
+aio doctor
+
+# 3. Live server telemetry & hardware metrics
+aio status
+
+# 4. Systemd services management
+aio services list
+aio services start <name>
+aio services stop <name>
+aio services restart <name>
+aio services logs <name>
+
+# 5. Nginx virtual hosts & SSL certificates
+aio web vhosts
+aio web ssl
+
+# 6. Databases inspection & SQL backups
+aio db postgres
+aio db mysql
+aio db backup --engine postgres --db <name>
+
+# 7. OpenSSH, Firewall & Linux users
+aio security ssh
+aio security firewall
+aio security users
+
+# 8. Cron & Docker
+aio cron
+aio docker
+```
 
 ---
 

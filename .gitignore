@@ -1,0 +1,28 @@
+# Binaries & Executables
+*.exe
+/aio
+/aio-dev.exe
+/aio-linux-amd64
+/aio-linux-arm64
+/aio-panel.exe
+/aio.exe
+
+# Local Data, SQLite & Logs
+data/aio.db*
+data/backups/*
+data/logs/*
+!data/backups/.gitkeep
+!data/logs/.gitkeep
+
+# Node & Frontend dependencies
+node_modules/
+web/node_modules/
+web/.vite/
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
