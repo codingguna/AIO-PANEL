@@ -47,8 +47,9 @@ func NewServer(cfg *config.Config, store *db.Store) *Server {
 	mux.HandleFunc("GET /api/v1/auth/users", authHandler.ListUsers)
 	mux.HandleFunc("DELETE /api/v1/auth/users/{id}", authHandler.DeleteUser)
 
-	// Store Routes (1-Click Package Installer)
+	// Store Routes (1-Click Package Installer & Live Linux Repository Search)
 	mux.HandleFunc("GET /api/v1/store/packages", storeHandler.ListPackages)
+	mux.HandleFunc("GET /api/v1/store/search", storeHandler.SearchPackages)
 	mux.HandleFunc("POST /api/v1/store/install", storeHandler.InstallPackage)
 	mux.HandleFunc("GET /api/v1/store/jobs/{id}", storeHandler.GetJobStatus)
 

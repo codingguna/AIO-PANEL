@@ -4,8 +4,7 @@
 # Philosophy: "Discovery is read-only. Management is explicit."
 # AIO manages the server; it does NOT take ownership of the server.
 # ==============================================================================
-
-set -euo pipefail
+set -e
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

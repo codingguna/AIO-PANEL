@@ -27,6 +27,21 @@ func (h *StoreHandler) ListPackages(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(packages)
 }
 
+// SearchPackages handles GET /api/v1/store/search?q=query
+func (h *StoreHandler) SearchPackages(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	packages, err := h.installer.SearchSystemPackages(r.Context(), q)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(packages)
+}
+
 type InstallPackageRequest struct {
 	PackageID string `json:"package_id"`
 	Version   string `json:"version"`

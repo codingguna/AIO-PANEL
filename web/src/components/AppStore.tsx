@@ -22,8 +22,11 @@ import { StorePackage, InstallJob } from '../types';
 
 export const AppStore: React.FC = () => {
   const [packages, setPackages] = useState<StorePackage[]>([]);
+  const [repoResults, setRepoResults] = useState<StorePackage[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [searchingRepo, setSearchingRepo] = useState<boolean>(false);
   const [search, setSearch] = useState<string>('');
+  const [storeMode, setStoreMode] = useState<'featured' | 'live_repo'>('featured');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({});
 
@@ -55,9 +58,39 @@ export const AppStore: React.FC = () => {
     }
   };
 
+  const handleSearchLiveRepo = async (queryText: string) => {
+    const q = queryText.trim();
+    if (!q) {
+      setRepoResults([]);
+      return;
+    }
+    setSearchingRepo(true);
+    try {
+      const res = await fetch(`/api/v1/store/search?q=${encodeURIComponent(q)}`);
+      if (res.ok) {
+        const data: StorePackage[] = await res.json();
+        setRepoResults(data || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSearchingRepo(false);
+    }
+  };
+
   useEffect(() => {
     fetchPackages();
   }, []);
+
+  // Trigger live repo search if search query changes in live_repo mode
+  useEffect(() => {
+    if (storeMode === 'live_repo' && search.trim().length >= 2) {
+      const timer = setTimeout(() => {
+        handleSearchLiveRepo(search);
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [search, storeMode]);
 
   // Poll active installation job
   useEffect(() => {
@@ -122,16 +155,18 @@ export const AppStore: React.FC = () => {
     }
   };
 
-  const categories = ['All', 'Web Server', 'Runtime', 'Database', 'Containers', 'Security', 'DevOps'];
+  const categories = ['All', 'Web Server', 'Web Apps', 'Runtime', 'Database', 'Containers', 'Security', 'DevOps'];
 
-  const filteredPackages = packages.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.description.toLowerCase().includes(search.toLowerCase()) ||
-      p.category.toLowerCase().includes(search.toLowerCase());
-    const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
-    return matchesSearch && matchesCat;
-  });
+  const displayedPackages = storeMode === 'featured'
+    ? packages.filter((p) => {
+        const matchesSearch =
+          p.name.toLowerCase().includes(search.toLowerCase()) ||
+          p.description.toLowerCase().includes(search.toLowerCase()) ||
+          p.category.toLowerCase().includes(search.toLowerCase());
+        const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
+        return matchesSearch && matchesCat;
+      })
+    : repoResults;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -140,37 +175,76 @@ export const AppStore: React.FC = () => {
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
           <div>
             <div className="panel-title">
-              <ShoppingBag size={20} /> AIO Software Store & 1-Click Installer
+              <ShoppingBag size={20} /> AIO Software Store & Package Manager
             </div>
             <div className="panel-subtitle">
-              Easily install and manage web servers, runtimes, databases, and DevOps tools
+              1-Click server stacks, web apps, and live Linux repository package manager
             </div>
           </div>
 
           {/* Search Box */}
-          <div style={{ position: 'relative', minWidth: '260px' }}>
-            <input
-              type="text"
-              placeholder="Search packages (e.g. nginx, node, postgres)..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ width: '100%', paddingLeft: '2.2rem' }}
-            />
-            <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '320px' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                type="text"
+                placeholder={storeMode === 'featured' ? "Filter featured stacks (nginx, node, postgres)..." : "Search 60,000+ Linux packages (e.g. ffmpeg, tmux, redis)..."}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && storeMode === 'live_repo') {
+                    handleSearchLiveRepo(search);
+                  }
+                }}
+                style={{ width: '100%', paddingLeft: '2.2rem' }}
+              />
+              <Search size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-subtle)' }} />
+            </div>
+            {storeMode === 'live_repo' && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => handleSearchLiveRepo(search)}
+                disabled={searchingRepo || !search.trim()}
+              >
+                {searchingRepo ? <RotateCw size={14} className="animate-spin" /> : 'Search'}
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Category Pills */}
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.85rem' }}>
-          {categories.map((cat) => (
+        {/* Store Mode Tabs & Categories */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '0.85rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
-              key={cat}
-              className={`btn btn-sm ${selectedCategory === cat ? 'btn-primary' : ''}`}
-              onClick={() => setSelectedCategory(cat)}
+              className={`btn btn-sm ${storeMode === 'featured' ? 'btn-primary' : ''}`}
+              onClick={() => setStoreMode('featured')}
             >
-              {cat}
+              ✨ Featured Stacks & Web Apps
             </button>
-          ))}
+            <button
+              className={`btn btn-sm ${storeMode === 'live_repo' ? 'btn-primary' : ''}`}
+              onClick={() => {
+                setStoreMode('live_repo');
+                if (search.trim()) handleSearchLiveRepo(search);
+              }}
+            >
+              🐧 Live Linux Repositories (APT / DNF)
+            </button>
+          </div>
+
+          {storeMode === 'featured' && (
+            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  className={`btn btn-sm ${selectedCategory === cat ? 'btn-secondary' : ''}`}
+                  onClick={() => setSelectedCategory(cat)}
+                  style={{ fontSize: '0.78rem', padding: '0.2rem 0.55rem' }}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -179,9 +253,18 @@ export const AppStore: React.FC = () => {
         <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
           Loading software catalog and inspecting server stack...
         </div>
-      ) : filteredPackages.length === 0 ? (
+      ) : searchingRepo ? (
         <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-          No software packages found matching "{search}".
+          <RotateCw size={24} className="animate-spin" style={{ margin: '0 auto 0.75rem auto', color: 'var(--primary)' }} />
+          <div>Querying live Linux repositories for "{search}"...</div>
+        </div>
+      ) : displayedPackages.length === 0 ? (
+        <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+          {storeMode === 'live_repo' ? (
+            search.trim() ? `No Linux packages found in repository matching "${search}".` : "Type any package name above (e.g. ffmpeg, zsh, redis, tmux, libvips) to search Linux repositories live."
+          ) : (
+            `No software packages found matching "${search}".`
+          )}
         </div>
       ) : (
         <div style={{
@@ -189,7 +272,7 @@ export const AppStore: React.FC = () => {
           gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
           gap: '1.25rem',
         }}>
-          {filteredPackages.map((pkg) => {
+          {displayedPackages.map((pkg: StorePackage) => {
             return (
               <div
                 key={pkg.id}
@@ -275,7 +358,7 @@ export const AppStore: React.FC = () => {
                         onChange={(e) => setSelectedVersions({ ...selectedVersions, [pkg.id]: e.target.value })}
                         style={{ width: '100%', fontSize: '0.8rem', padding: '0.35rem 0.55rem' }}
                       >
-                        {pkg.versions.map((ver) => (
+                        {pkg.versions.map((ver: string) => (
                           <option key={ver} value={ver}>{ver}</option>
                         ))}
                       </select>
