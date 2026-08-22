@@ -12,6 +12,7 @@ import (
 
 var (
 	installPort int
+	purgeData   bool
 )
 
 var installCmd = &cobra.Command{
@@ -43,7 +44,7 @@ and enables automatic startup on server boot.`,
 
 		targetBin := "/usr/local/bin/aio"
 		if execPath != targetBin {
-			fmt.Printf("📦 Copying binary to %s...\n", targetBin)
+			fmt.Printf("📦 Installing binary to %s...\n", targetBin)
 			src, err := os.Open(execPath)
 			if err != nil {
 				fmt.Printf("❌ Failed to read binary: %v\n", err)
@@ -62,6 +63,7 @@ and enables automatic startup on server boot.`,
 				return
 			}
 			dst.Close()
+			_ = os.Chmod(targetBin, 0755)
 		}
 
 		// 2. Create required directories
@@ -70,7 +72,7 @@ and enables automatic startup on server boot.`,
 			"/var/lib/aio",
 			"/var/lib/aio/data",
 			"/var/lib/aio/backups",
-			"/var/lib/aio/logs",
+			"/var/log/aio",
 		}
 		for _, d := range dirs {
 			if err := os.MkdirAll(d, 0750); err != nil {
@@ -78,7 +80,36 @@ and enables automatic startup on server boot.`,
 			}
 		}
 
-		// 3. Write /etc/systemd/system/aio-panel.service
+		// 3. Write default configuration if not present
+		configPath := "/etc/aio/aio.conf"
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			defaultConf := fmt.Sprintf(`{
+  "server": {
+    "host": "0.0.0.0",
+    "port": %d,
+    "tls": false
+  },
+  "database": {
+    "path": "/var/lib/aio/data/aio.db"
+  },
+  "logging": {
+    "level": "info",
+    "format": "pretty",
+    "file": "/var/log/aio/aio.log"
+  },
+  "paths": {
+    "config_dir": "/etc/aio",
+    "data_dir": "/var/lib/aio",
+    "log_dir": "/var/log/aio",
+    "backup_dir": "/var/lib/aio/backups"
+  }
+}
+`, installPort)
+			_ = os.WriteFile(configPath, []byte(defaultConf), 0600)
+			fmt.Println("✅ Provisioned /etc/aio/aio.conf")
+		}
+
+		// 4. Write /etc/systemd/system/aio-panel.service
 		unitContent := fmt.Sprintf(`[Unit]
 Description=AIO-PANEL Server Management Daemon
 After=network.target network-online.target
@@ -87,6 +118,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
+WorkingDirectory=/var/lib/aio
 ExecStart=%s server --config /etc/aio/aio.conf
 Restart=always
 RestartSec=5
@@ -105,7 +137,7 @@ WantedBy=multi-user.target
 		}
 		fmt.Println("✅ Installed /etc/systemd/system/aio-panel.service")
 
-		// 4. Reload systemd, enable & start service
+		// 5. Reload systemd, enable & start service
 		_ = exec.Command("systemctl", "daemon-reload").Run()
 		if err := exec.Command("systemctl", "enable", "aio-panel.service").Run(); err != nil {
 			fmt.Printf("⚠️ Warning enabling service: %v\n", err)
@@ -118,10 +150,24 @@ WantedBy=multi-user.target
 			return
 		}
 
-		fmt.Println("✅ Started aio-panel.service")
+		// 6. Verify service status
+		fmt.Println("🔍 Verifying service status and health...")
+		if err := exec.Command("systemctl", "is-active", "--quiet", "aio-panel.service").Run(); err != nil {
+			fmt.Println("⚠️ Warning: aio-panel.service is starting up or encountered an issue.")
+			fmt.Println("Inspect logs with: journalctl -u aio-panel.service -n 30 --no-pager")
+		} else {
+			fmt.Println("✅ Service is active and running")
+		}
+
 		fmt.Println("──────────────────────────────────────────────────")
-		fmt.Printf("✨ AIO-PANEL is now running and will autostart on reboot!\n")
-		fmt.Printf("🌐 Access your web panel at: http://YOUR_SERVER_IP:5555\n")
+		fmt.Println("🎉 AIO-PANEL is now installed & running!")
+		fmt.Println("──────────────────────────────────────────────────")
+		fmt.Println("👑 Step 1: Create your superuser login:")
+		fmt.Println("   sudo aio createsuperuser")
+		fmt.Println("")
+		fmt.Printf("🌐 Step 2: Access your web panel at:\n")
+		fmt.Printf("   http://YOUR_SERVER_IP:%d\n", installPort)
+		fmt.Println("──────────────────────────────────────────────────")
 	},
 }
 
@@ -144,13 +190,23 @@ var uninstallCmd = &cobra.Command{
 		_ = exec.Command("systemctl", "disable", "aio-panel.service").Run()
 		_ = os.Remove("/etc/systemd/system/aio-panel.service")
 		_ = exec.Command("systemctl", "daemon-reload").Run()
+		_ = os.Remove("/usr/local/bin/aio")
 
-		fmt.Println("✅ Removed aio-panel.service. Your server stack and existing apps are untouched.")
+		if purgeData {
+			_ = os.RemoveAll("/etc/aio")
+			_ = os.RemoveAll("/var/lib/aio")
+			_ = os.RemoveAll("/var/log/aio")
+			fmt.Println("🧹 Removed configuration, logs, and database directories.")
+		}
+
+		fmt.Println("✅ AIO-PANEL has been cleanly uninstalled.")
+		fmt.Println("🛡️ All existing applications, web servers, and databases remain untouched.")
 	},
 }
 
 func init() {
 	installCmd.Flags().IntVarP(&installPort, "port", "p", 5555, "Port for AIO-PANEL to listen on")
+	uninstallCmd.Flags().BoolVar(&purgeData, "purge", false, "Remove all database files, logs, and configuration directories")
 	RootCmd.AddCommand(installCmd)
 	RootCmd.AddCommand(uninstallCmd)
 }
