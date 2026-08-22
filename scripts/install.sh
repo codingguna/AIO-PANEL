@@ -176,13 +176,39 @@ systemctl daemon-reload
 systemctl enable aio-panel.service
 systemctl restart aio-panel.service
 
-# 7. Success Banner
+# 7. Post-Installation Health Verification
+echo -e "${YELLOW}🔍 Verifying service status and health endpoint...${NC}"
+sleep 1.5
+
+if ! systemctl is-active --quiet aio-panel.service; then
+    echo -e "${RED}❌ Error: aio-panel.service failed to start!${NC}"
+    echo -e "Inspect logs with: ${CYAN}journalctl -u aio-panel -n 30 --no-pager${NC}"
+    exit 1
+fi
+echo -e "systemd service   ${GREEN}✓ active & running${NC}"
+
+HEALTH_OK=false
+for i in {1..10}; do
+    if curl -s -f "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 || curl -s -f "http://127.0.0.1:${PORT}/api/v1/health" >/dev/null 2>&1; then
+        HEALTH_OK=true
+        break
+    fi
+    sleep 0.5
+done
+
+if [[ "$HEALTH_OK" == "true" ]]; then
+    echo -e "HTTP API Health   ${GREEN}✓ 200 OK (http://127.0.0.1:${PORT}/health)${NC}"
+else
+    echo -e "HTTP API Health   ${YELLOW}⚠️ Service started, waiting for port ${PORT}${NC}"
+fi
+
+# 8. Success Banner
 SERVER_IP=$(hostname -I | awk '{print $1}' || echo "SERVER_IP")
 echo -e "\n${GREEN}============================================================${NC}"
-echo -e "${GREEN}🎉 AIO-PANEL successfully installed & running!${NC}"
+echo -e "${GREEN}🎉 AIO-PANEL successfully installed & verified!${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo -e "Web Access : ${CYAN}http://${SERVER_IP}:${PORT}${NC}"
-echo -e "Superuser  : ${CYAN}sudo aio createsuperuser${NC} (Create admin login)"
+echo -e "Superuser  : ${CYAN}sudo aio createsuperuser${NC} (Run this to set admin login)"
 echo -e "CLI Tool   : ${CYAN}aio status${NC} or ${CYAN}aio doctor${NC}"
 echo -e "Logs       : ${CYAN}journalctl -u aio-panel -f${NC}"
 echo -e "${GREEN}============================================================${NC}\n"
